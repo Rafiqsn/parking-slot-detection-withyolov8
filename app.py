@@ -506,7 +506,7 @@ if st.session_state.slots is not None:
             }
         )
 
-        # Tombol download untuk batch ini
+        # Tombol download untuk batch ini (letakkan sebelum logika kelanjutan proses)
         with open(batch_filepath, "rb") as f:
             video_bytes = f.read()
         st.download_button(
@@ -570,7 +570,7 @@ if st.session_state.slots is not None:
             st.info(
                 f"Batch {batch_num} selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
             )
-            # Tombol lanjutkan proses
+            # Tombol lanjutkan proses (hanya tombol ini yang trigger rerun/lanjut)
             if st.button("Lanjutkan Proses", key="continue_process"):
                 st.session_state.batch_num += 1
                 st.session_state.video_process = None
