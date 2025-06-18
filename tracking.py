@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
 
@@ -99,17 +100,32 @@ class Tracker:
             pos = t.predict()
             trks.append(pos)
 
-        # Extract features for detections, skip if extraction fails
-        features = []
+        # Batch extract features for detections
+        crops = []
         valid_det_indices = []
         for idx, det in enumerate(detections):
-            try:
-                feat = extract_feature_from_bbox(frame, det, self.feature_model)
-                if feat is not None:
-                    features.append(feat)
-                    valid_det_indices.append(idx)
-            except Exception:
+            x1, y1, x2, y2 = det
+            cropped = frame[y1:y2, x1:x2]
+            if cropped.size == 0 or cropped.shape[0] == 0 or cropped.shape[1] == 0:
                 continue
+            crops.append(cropped)
+            valid_det_indices.append(idx)
+
+        features = []
+        if crops:
+            # Convert all crops to PIL and tensor, then stack
+            from cnn_resnet18 import transform
+
+            imgs_pil = [
+                Image.fromarray(cv2.cvtColor(c, cv2.COLOR_BGR2RGB)) for c in crops
+            ]
+            tensors = [transform(img).unsqueeze(0) for img in imgs_pil]
+            input_tensor = torch.cat(tensors, dim=0)
+            device = next(self.feature_model.parameters()).device
+            input_tensor = input_tensor.to(device)
+            with torch.no_grad():
+                feats = self.feature_model(input_tensor)
+            features = feats.cpu().numpy()
 
         # If no valid detections/features, handle gracefully
         if len(features) == 0 or len(trks) == 0:
@@ -159,10 +175,7 @@ class Tracker:
 
         # Update matched trackers (with index checking)
         for t, f in matched:
-            if (
-                t < len(self.trackers)
-                and f < len(features)
-            ):
+            if t < len(self.trackers) and f < len(features):
                 det_idx = valid_det_indices[f]
                 self.trackers[t].update(detections[det_idx], features[f])
 

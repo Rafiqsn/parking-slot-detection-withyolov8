@@ -297,6 +297,11 @@ if st.session_state.slots is not None:
                 if not ret:
                     break
 
+                # Proses setiap 2 frame saja untuk preview cepat
+                if frame_idx % 2 != 0:
+                    frame_idx += 1
+                    continue
+
                 # Deteksi mobil
                 results = detector(frame)[0]
                 detections = []
