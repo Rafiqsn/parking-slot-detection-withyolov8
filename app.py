@@ -36,9 +36,9 @@ VIDEO_CONFIG = [
     },
     {
         "id": 2,
-        "drive_id": "1g452_pqKTBNNoIGE6SnwOThapTiDuvpj",
-        "slot_path": "anotasi/slot_polygons1.json",
-        "filename": "video/input1.mp4",
+        "drive_id": "10RVC61BpnkKHxp1GTY1NGbbzU9s_nE9p",
+        "slot_path": "anotasi/slot_polygons2.json",
+        "filename": "video/input2.mp4",
     },
     {
         "id": 3,
@@ -68,7 +68,7 @@ VIDEO_CONFIG = [
         "id": 7,
         "drive_id": "1UthosiapTF2C9CWZVGkeXM6c-zbRYUcf",
         "slot_path": "anotasi/slot_polygons7.json",
-        "filename": "video/input6.mp4",
+        "filename": "video/input7.mp4",
     },
     {
         "id": 8,
