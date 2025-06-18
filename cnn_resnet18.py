@@ -40,6 +40,9 @@ def load_embeder_from_pt(path):
 def extract_feature_from_bbox(image, bbox, model):
     x1, y1, x2, y2 = bbox
     cropped = image[y1:y2, x1:x2]
+    # Return None if crop is invalid
+    if cropped.size == 0 or cropped.shape[0] == 0 or cropped.shape[1] == 0:
+        return None
     img_pil = Image.fromarray(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
     input_tensor = transform(img_pil).unsqueeze(0)
     device = next(model.parameters()).device

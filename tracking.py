@@ -99,55 +99,78 @@ class Tracker:
             pos = t.predict()
             trks.append(pos)
 
-        # Extract features for detections
+        # Extract features for detections, skip if extraction fails
         features = []
-        for det in detections:
-            feat = extract_feature_from_bbox(frame, det, self.feature_model)
-            features.append(feat)
+        valid_det_indices = []
+        for idx, det in enumerate(detections):
+            try:
+                feat = extract_feature_from_bbox(frame, det, self.feature_model)
+                if feat is not None:
+                    features.append(feat)
+                    valid_det_indices.append(idx)
+            except Exception:
+                continue
+
+        # If no valid detections/features, handle gracefully
+        if len(features) == 0 or len(trks) == 0:
+            # Remove dead trackers
+            self.trackers = [
+                t for t in self.trackers if t.time_since_update <= self.max_age
+            ]
+            # Return list of active tracks: [id, bbox]
+            results = []
+            for t in self.trackers:
+                if t.hits >= self.min_hits or self.frame_count <= self.min_hits:
+                    bbox = t.get_state()
+                    bbox = bbox.tolist() if hasattr(bbox, "tolist") else bbox
+                    results.append((t.id, bbox))
+            return results
 
         # Compute cost matrix (cosine distance + IOU)
-        cost_matrix = np.zeros((len(trks), len(detections)), dtype=np.float32)
-        # Use zip to ensure tracker and trks are always in sync
+        cost_matrix = np.zeros((len(trks), len(features)), dtype=np.float32)
         for t_idx, (tracker, trk_pos) in enumerate(zip(self.trackers, trks)):
-            for d, det in enumerate(detections):
+            for f_idx, feat in enumerate(features):
+                det_idx = valid_det_indices[f_idx]
+                det = detections[det_idx]
                 iou_score = iou(trk_pos, det)
-                cos_dist = cosine(tracker.feature, features[d])
+                cos_dist = cosine(tracker.feature, feat)
                 # Lower cost for better match
-                cost_matrix[t_idx, d] = 0.5 * (1 - iou_score) + 0.5 * cos_dist
+                cost_matrix[t_idx, f_idx] = 0.5 * (1 - iou_score) + 0.5 * cos_dist
 
         matched, unmatched_trks, unmatched_dets = [], [], []
-        if len(trks) > 0 and len(detections) > 0:
+        if len(trks) > 0 and len(features) > 0:
             row_ind, col_ind = linear_sum_assignment(cost_matrix)
             assigned_trks = set()
             assigned_dets = set()
             for r, c in zip(row_ind, col_ind):
                 if (
                     r < len(self.trackers)
-                    and c < len(detections)
+                    and c < len(features)
                     and cost_matrix[r, c] < self.cos_threshold
                 ):
                     matched.append((r, c))
                     assigned_trks.add(r)
                     assigned_dets.add(c)
             unmatched_trks = [i for i in range(len(trks)) if i not in assigned_trks]
-            unmatched_dets = [i for i in range(len(detections)) if i not in assigned_dets]
+            unmatched_dets = [i for i in range(len(features)) if i not in assigned_dets]
         else:
             unmatched_trks = list(range(len(trks)))
-            unmatched_dets = list(range(len(detections)))
+            unmatched_dets = list(range(len(features)))
 
         # Update matched trackers (with index checking)
-        for t, d in matched:
+        for t, f in matched:
             if (
                 t < len(self.trackers)
-                and d < len(detections)
-                and d < len(features)
+                and f < len(features)
             ):
-                self.trackers[t].update(detections[d], features[d])
+                det_idx = valid_det_indices[f]
+                self.trackers[t].update(detections[det_idx], features[f])
 
         # Create new trackers for unmatched detections
-        for i in unmatched_dets:
-            if i < len(detections) and i < len(features):
-                self.trackers.append(KalmanBoxTracker(detections[i], features[i]))
+        for f in unmatched_dets:
+            if f < len(features):
+                det_idx = valid_det_indices[f]
+                self.trackers.append(KalmanBoxTracker(detections[det_idx], features[f]))
 
         # Remove dead trackers
         self.trackers = [
