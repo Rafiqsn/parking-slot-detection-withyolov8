@@ -4,3 +4,4 @@ streamlit
 scipy
 Pillow
 torchvision
+opencv-python
