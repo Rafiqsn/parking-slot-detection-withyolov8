@@ -107,12 +107,13 @@ class Tracker:
 
         # Compute cost matrix (cosine distance + IOU)
         cost_matrix = np.zeros((len(trks), len(detections)), dtype=np.float32)
-        for t, tracker in enumerate(self.trackers):
+        # Use zip to ensure tracker and trks are always in sync
+        for t_idx, (tracker, trk_pos) in enumerate(zip(self.trackers, trks)):
             for d, det in enumerate(detections):
-                iou_score = iou(trks[t], det)
+                iou_score = iou(trk_pos, det)
                 cos_dist = cosine(tracker.feature, features[d])
                 # Lower cost for better match
-                cost_matrix[t, d] = 0.5 * (1 - iou_score) + 0.5 * cos_dist
+                cost_matrix[t_idx, d] = 0.5 * (1 - iou_score) + 0.5 * cos_dist
 
         matched, unmatched_trks, unmatched_dets = [], [], []
         if len(trks) > 0 and len(detections) > 0:
