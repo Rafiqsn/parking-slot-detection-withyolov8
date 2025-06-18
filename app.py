@@ -143,6 +143,22 @@ st.video(video_path)
 if "slots" not in st.session_state:
     st.session_state.slots = None
 
+# Tambahkan inisialisasi video_process
+if "video_process" not in st.session_state:
+    st.session_state.video_process = None
+
+cap = cv2.VideoCapture(video_path)
+video_duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
+cap.release()
+selected_time = st.slider(
+    "Pilih waktu (detik) untuk deteksi",
+    min_value=0.0,
+    max_value=float(video_duration),
+    value=float(video_duration) - 1,
+    step=1.0,
+    format="%.1f",
+)
+
 # Tombol untuk mendeteksi kondisi parkir saat ini
 if st.button("Cari Parkir Sekarang"):
     # Ambil frame terakhir dari video
@@ -270,8 +286,13 @@ if st.button("Cari Parkir Sekarang"):
 
 # Tombol proses video, hanya aktif jika sudah ada hasil deteksi (slots)
 if st.session_state.slots is not None:
-    if st.button("Proses Video Hasil Deteksi"):
-        with st.spinner("Mempersiapkan video hasil deteksi..."):
+    # Inisialisasi proses video jika tombol ditekan atau session state kosong
+    if (
+        st.button("Proses Video Hasil Deteksi")
+        or st.session_state.video_process is not None
+    ):
+        # --- Inisialisasi proses jika belum ada ---
+        if st.session_state.video_process is None:
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -409,13 +430,22 @@ if st.session_state.slots is not None:
                         caption=f"Preview Frame {frame_idx}",
                     )
 
-            cap.release()
-            out.release()
-            progress_bar.empty()
-            preview_placeholder.empty()
+        cap.release()
+        out.release()
 
-            # Baca file hasil video untuk diunduh
-            with open(temp_video.name, "rb") as f:
+        # Update session state
+        st.session_state.video_process.update(
+            {
+                "frame_idx": frame_idx,
+                "last_detections": last_detections,
+                "last_results": last_results,
+                "tracker": tracker,
+            }
+        )
+
+        # Jika selesai, tampilkan tombol download dan hapus session state
+        if frame_idx >= total_frames:
+            with open(process["temp_video_path"], "rb") as f:
                 video_bytes = f.read()
             st.download_button(
                 label="Unduh Video Hasil Deteksi",
@@ -423,6 +453,11 @@ if st.session_state.slots is not None:
                 file_name="hasil_deteksi.mp4",
                 mime="video/mp4",
             )
-
-            # Hapus file sementara setelah diunduh
-            Path(temp_video.name).unlink(missing_ok=True)
+            Path(process["temp_video_path"]).unlink(missing_ok=True)
+            st.session_state.video_process = None
+            st.success("Proses video selesai!")
+        else:
+            st.info(
+                f"Proses batch selesai. {frame_idx}/{total_frames} frame telah diproses."
+            )
+            st.button("Lanjutkan Proses", on_click=lambda: None, key="continue_process")
