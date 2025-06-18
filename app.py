@@ -38,7 +38,7 @@ VIDEO_CONFIG = [
         "id": 2,
         "drive_id": "1ztuisKm2nipkJYzPzhDMBSQgRJ8LmbKN",
         "slot_path": "anotasi/slot_polygons2.json",
-        "filename": "video/input11.mp4",
+        "filename": "video/input2.mp4",
     },
     {
         "id": 3,
@@ -174,6 +174,9 @@ if st.button("Cari Parkir Sekarang"):
         # Buat mapping bbox->track_id
         bbox_id_map = {}
         for track_id, bbox in tracks:
+            # Pastikan bbox dalam format list/array 4 elemen
+            if bbox is None or len(bbox) != 4:
+                continue
             # Cari deteksi dengan IOU tertinggi
             best_iou = 0
             best_det = None
@@ -308,6 +311,8 @@ if st.session_state.slots is not None:
                 # Buat mapping bbox->track_id
                 bbox_id_map = {}
                 for track_id, bbox in tracks:
+                    if bbox is None or len(bbox) != 4:
+                        continue
                     best_iou = 0
                     best_det = None
                     for det in detections:

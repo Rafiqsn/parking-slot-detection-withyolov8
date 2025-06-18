@@ -117,25 +117,36 @@ class Tracker:
         matched, unmatched_trks, unmatched_dets = [], [], []
         if len(trks) > 0 and len(detections) > 0:
             row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            assigned_trks = set()
+            assigned_dets = set()
             for r, c in zip(row_ind, col_ind):
-                if cost_matrix[r, c] < self.cos_threshold:
+                if (
+                    r < len(self.trackers)
+                    and c < len(detections)
+                    and cost_matrix[r, c] < self.cos_threshold
+                ):
                     matched.append((r, c))
-                else:
-                    unmatched_trks.append(r)
-                    unmatched_dets.append(c)
-            unmatched_trks += [i for i in range(len(trks)) if i not in row_ind]
-            unmatched_dets += [i for i in range(len(detections)) if i not in col_ind]
+                    assigned_trks.add(r)
+                    assigned_dets.add(c)
+            unmatched_trks = [i for i in range(len(trks)) if i not in assigned_trks]
+            unmatched_dets = [i for i in range(len(detections)) if i not in assigned_dets]
         else:
             unmatched_trks = list(range(len(trks)))
             unmatched_dets = list(range(len(detections)))
 
-        # Update matched trackers
+        # Update matched trackers (with index checking)
         for t, d in matched:
-            self.trackers[t].update(detections[d], features[d])
+            if (
+                t < len(self.trackers)
+                and d < len(detections)
+                and d < len(features)
+            ):
+                self.trackers[t].update(detections[d], features[d])
 
         # Create new trackers for unmatched detections
         for i in unmatched_dets:
-            self.trackers.append(KalmanBoxTracker(detections[i], features[i]))
+            if i < len(detections) and i < len(features):
+                self.trackers.append(KalmanBoxTracker(detections[i], features[i]))
 
         # Remove dead trackers
         self.trackers = [
@@ -146,5 +157,7 @@ class Tracker:
         results = []
         for t in self.trackers:
             if t.hits >= self.min_hits or self.frame_count <= self.min_hits:
-                results.append((t.id, t.get_state()))
+                bbox = t.get_state()
+                bbox = bbox.tolist() if hasattr(bbox, "tolist") else bbox
+                results.append((t.id, bbox))
         return results
