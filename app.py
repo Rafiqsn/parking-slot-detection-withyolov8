@@ -161,10 +161,15 @@ selected_time = st.slider(
 
 # Tombol untuk mendeteksi kondisi parkir saat ini
 if st.button("Cari Parkir Sekarang"):
-    # Ambil frame terakhir dari video
+    # Ambil frame pada waktu yang dipilih user (selected_time)
     cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count - 5)
+    # Hitung frame index dari detik yang dipilih
+    frame_idx = int(selected_time * fps)
+    # Pastikan frame_idx tidak melebihi jumlah frame
+    frame_idx = min(frame_idx, frame_count - 1)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ret, frame = cap.read()
     cap.release()
 
@@ -286,6 +291,9 @@ if st.button("Cari Parkir Sekarang"):
 
 # Tombol proses video, hanya aktif jika sudah ada hasil deteksi (slots)
 if st.session_state.slots is not None:
+    # --- Parameter batch ---
+    BATCH_SIZE = 100
+
     # Inisialisasi proses video jika tombol ditekan atau session state kosong
     if (
         st.button("Proses Video Hasil Deteksi")
@@ -299,7 +307,9 @@ if st.session_state.slots is not None:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            # File sementara untuk hasil video
+            status_placeholder = st.empty()
+            status_placeholder.info("Proses sedang berjalan...")
+
             temp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
             out = cv2.VideoWriter(
                 temp_video.name,
@@ -312,144 +322,187 @@ if st.session_state.slots is not None:
             preview_placeholder = st.empty()
 
             frame_idx = 0
-            slots = st.session_state.slots  # Ambil dari session state
+            slots = st.session_state.slots
 
-            # Inisialisasi variabel yang akan digunakan untuk update session state
             last_detections = None
             last_results = None
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                # Proses setiap 2 frame saja untuk preview cepat
-                if frame_idx % 2 != 0:
-                    frame_idx += 1
-                    continue
-
-                # Deteksi mobil
-                results = detector(frame)[0]
-                detections = []
-                for box, cls in zip(results.boxes.xyxy, results.boxes.cls):
-                    if int(cls) == 0:
-                        x1, y1, x2, y2 = map(int, box)
-                        detections.append([x1, y1, x2, y2])
-
-                # Tracking
-                tracks = tracker.update(frame, detections)
-
-                # Buat mapping bbox->track_id
-                bbox_id_map = {}
-                for track_id, bbox in tracks:
-                    if bbox is None or len(bbox) != 4:
-                        continue
-                    best_iou = 0
-                    best_det = None
-                    for det in detections:
-                        xx1 = max(bbox[0], det[0])
-                        yy1 = max(bbox[1], det[1])
-                        xx2 = min(bbox[2], det[2])
-                        yy2 = min(bbox[3], det[3])
-                        w = max(0, xx2 - xx1)
-                        h = max(0, yy2 - yy1)
-                        inter = w * h
-                        area1 = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                        area2 = (det[2] - det[0]) * (det[3] - det[1])
-                        iou = inter / (area1 + area2 - inter + 1e-6)
-                        if iou > best_iou:
-                            best_iou = iou
-                            best_det = tuple(det)
-                    if best_det is not None and best_iou > 0.3:
-                        bbox_id_map[best_det] = track_id
-
-                # Gambar bounding box dan ID (jika ada)
-                for det in detections:
-                    x1, y1, x2, y2 = det
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-                    if tuple(det) in bbox_id_map:
-                        track_id = bbox_id_map[tuple(det)]
-                        cv2.putText(
-                            frame,
-                            f"ID:{track_id}",
-                            (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7,
-                            (0, 0, 255),
-                            2,
-                        )
-
-                # Cek slot kosong untuk setiap slot pada setiap frame
-                slot_status = {}
-                for slot in slots:
-                    slot_id = slot["id"]
-                    pts = np.array(slot["points"], np.int32)
-                    pts = pts.reshape((-1, 1, 2))
-                    occupied = False
-
-                    for det in detections:
-                        cx = int((det[0] + det[2]) / 2)
-                        cy = int((det[1] + det[3]) / 2)
-                        if cv2.pointPolygonTest(pts, (cx, cy), False) >= 0:
-                            occupied = True
-                            break
-
-                    color = (0, 0, 255) if occupied else (0, 255, 0)
-                    slot_status[slot_id] = (
-                        not occupied
-                    )  # True jika kosong, False jika terisi
-                    cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=2)
-                    text_pos = tuple(pts[0][0])
-                    cv2.putText(
-                        frame,
-                        f"ID:{slot_id}",
-                        text_pos,
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 0, 0),  # Outline hitam
-                        3,
-                        cv2.LINE_AA,
-                    )
-                    cv2.putText(
-                        frame,
-                        f"ID:{slot_id}",
-                        text_pos,
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),  # Teks putih
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-                out.write(frame)
-
-                # Simpan deteksi terakhir dan hasil terakhir
-                last_detections = detections
-                last_results = results
-
-                # Update progress bar
-                frame_idx += 1
-                if frame_idx % 10 == 0 or frame_idx == total_frames:
-                    progress_bar.progress(min(frame_idx / total_frames, 1.0))
-                # Show preview every 50 frames
-                if frame_idx % 50 == 0:
-                    preview_placeholder.image(
-                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
-                        channels="RGB",
-                        caption=f"Preview Frame {frame_idx}",
-                    )
-
-            cap.release()
-            out.release()
-
-            # Update session state
+            # Simpan state awal proses batch
             st.session_state.video_process = {
                 "frame_idx": frame_idx,
                 "last_detections": last_detections,
                 "last_results": last_results,
                 "tracker": tracker,
                 "temp_video_path": temp_video.name,
+                "total_frames": total_frames,
+                "slots": slots,
+                "video_path": video_path,
+                "fps": fps,
+                "width": width,
+                "height": height,
             }
+            cap.release()
+            out.release()
+
+        # --- Lanjutkan proses batch ---
+        # Ambil state dari session
+        process = st.session_state.video_process
+        frame_idx = process["frame_idx"]
+        total_frames = process["total_frames"]
+        slots = process["slots"]
+        temp_video_path = process["temp_video_path"]
+        fps = process["fps"]
+        width = process["width"]
+        height = process["height"]
+
+        # Buka video dan writer, seek ke frame terakhir
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        out = cv2.VideoWriter(
+            temp_video_path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height),
+        )
+
+        progress_bar = st.progress(min(frame_idx / total_frames, 1.0))
+        preview_placeholder = st.empty()
+        status_placeholder = st.empty()
+        status_placeholder.info("Proses batch sedang berjalan...")
+
+        batch_counter = 0
+        while frame_idx < total_frames and batch_counter < BATCH_SIZE:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Proses setiap 2 frame saja untuk preview cepat
+            if frame_idx % 2 != 0:
+                frame_idx += 1
+                continue
+
+            # Deteksi mobil
+            results = detector(frame)[0]
+            detections = []
+            for box, cls in zip(results.boxes.xyxy, results.boxes.cls):
+                if int(cls) == 0:
+                    x1, y1, x2, y2 = map(int, box)
+                    detections.append([x1, y1, x2, y2])
+
+            # Tracking
+            tracks = tracker.update(frame, detections)
+
+            # Buat mapping bbox->track_id
+            bbox_id_map = {}
+            for track_id, bbox in tracks:
+                if bbox is None or len(bbox) != 4:
+                    continue
+                best_iou = 0
+                best_det = None
+                for det in detections:
+                    xx1 = max(bbox[0], det[0])
+                    yy1 = max(bbox[1], det[1])
+                    xx2 = min(bbox[2], det[2])
+                    yy2 = min(bbox[3], det[3])
+                    w = max(0, xx2 - xx1)
+                    h = max(0, yy2 - yy1)
+                    inter = w * h
+                    area1 = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    area2 = (det[2] - det[0]) * (det[3] - det[1])
+                    iou = inter / (area1 + area2 - inter + 1e-6)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_det = tuple(det)
+                if best_det is not None and best_iou > 0.3:
+                    bbox_id_map[best_det] = track_id
+
+            # Gambar bounding box dan ID (jika ada)
+            for det in detections:
+                x1, y1, x2, y2 = det
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+                if tuple(det) in bbox_id_map:
+                    track_id = bbox_id_map[tuple(det)]
+                    cv2.putText(
+                        frame,
+                        f"ID:{track_id}",
+                        (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 0, 255),
+                        2,
+                    )
+
+            # Cek slot kosong untuk setiap slot pada setiap frame
+            slot_status = {}
+            for slot in slots:
+                slot_id = slot["id"]
+                pts = np.array(slot["points"], np.int32)
+                pts = pts.reshape((-1, 1, 2))
+                occupied = False
+
+                for det in detections:
+                    cx = int((det[0] + det[2]) / 2)
+                    cy = int((det[1] + det[3]) / 2)
+                    if cv2.pointPolygonTest(pts, (cx, cy), False) >= 0:
+                        occupied = True
+                        break
+
+                color = (0, 0, 255) if occupied else (0, 255, 0)
+                slot_status[slot_id] = not occupied
+                cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=2)
+                text_pos = tuple(pts[0][0])
+                cv2.putText(
+                    frame,
+                    f"ID:{slot_id}",
+                    text_pos,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 0),
+                    3,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    f"ID:{slot_id}",
+                    text_pos,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            out.write(frame)
+
+            # Simpan deteksi terakhir dan hasil terakhir
+            last_detections = detections
+            last_results = results
+
+            # Update progress bar
+            frame_idx += 1
+            batch_counter += 1
+            if frame_idx % 10 == 0 or frame_idx == total_frames:
+                progress_bar.progress(min(frame_idx / total_frames, 1.0))
+            # Show preview every 50 frames
+            if frame_idx % 50 == 0:
+                preview_placeholder.image(
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+                    channels="RGB",
+                    caption=f"Preview Frame {frame_idx}",
+                )
+
+        cap.release()
+        out.release()
+        status_placeholder.empty()
+
+        # Update session state
+        st.session_state.video_process.update(
+            {
+                "frame_idx": frame_idx,
+                "last_detections": last_detections,
+                "last_results": last_results,
+            }
+        )
 
         # Jika selesai, tampilkan tombol download dan hapus session state
         if st.session_state.video_process["frame_idx"] >= total_frames:
@@ -468,6 +521,8 @@ if st.session_state.slots is not None:
             st.success("Proses video selesai!")
         else:
             st.info(
-                f"Proses batch selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
+                f"Batch selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
             )
-            st.button("Lanjutkan Proses", on_click=lambda: None, key="continue_process")
+            # Tombol lanjutkan proses
+            if st.button("Lanjutkan Proses", key="continue_process"):
+                st.experimental_rerun()
