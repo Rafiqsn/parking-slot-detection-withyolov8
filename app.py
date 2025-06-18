@@ -313,6 +313,11 @@ if st.session_state.slots is not None:
 
             frame_idx = 0
             slots = st.session_state.slots  # Ambil dari session state
+
+            # Inisialisasi variabel yang akan digunakan untuk update session state
+            last_detections = None
+            last_results = None
+
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -418,6 +423,10 @@ if st.session_state.slots is not None:
 
                 out.write(frame)
 
+                # Simpan deteksi terakhir dan hasil terakhir
+                last_detections = detections
+                last_results = results
+
                 # Update progress bar
                 frame_idx += 1
                 if frame_idx % 10 == 0 or frame_idx == total_frames:
@@ -430,22 +439,21 @@ if st.session_state.slots is not None:
                         caption=f"Preview Frame {frame_idx}",
                     )
 
-        cap.release()
-        out.release()
+            cap.release()
+            out.release()
 
-        # Update session state
-        st.session_state.video_process.update(
-            {
+            # Update session state
+            st.session_state.video_process = {
                 "frame_idx": frame_idx,
                 "last_detections": last_detections,
                 "last_results": last_results,
                 "tracker": tracker,
+                "temp_video_path": temp_video.name,
             }
-        )
 
         # Jika selesai, tampilkan tombol download dan hapus session state
-        if frame_idx >= total_frames:
-            with open(process["temp_video_path"], "rb") as f:
+        if st.session_state.video_process["frame_idx"] >= total_frames:
+            with open(st.session_state.video_process["temp_video_path"], "rb") as f:
                 video_bytes = f.read()
             st.download_button(
                 label="Unduh Video Hasil Deteksi",
@@ -453,11 +461,13 @@ if st.session_state.slots is not None:
                 file_name="hasil_deteksi.mp4",
                 mime="video/mp4",
             )
-            Path(process["temp_video_path"]).unlink(missing_ok=True)
+            Path(st.session_state.video_process["temp_video_path"]).unlink(
+                missing_ok=True
+            )
             st.session_state.video_process = None
             st.success("Proses video selesai!")
         else:
             st.info(
-                f"Proses batch selesai. {frame_idx}/{total_frames} frame telah diproses."
+                f"Proses batch selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
             )
             st.button("Lanjutkan Proses", on_click=lambda: None, key="continue_process")
