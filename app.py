@@ -36,7 +36,7 @@ VIDEO_CONFIG = [
     },
     {
         "id": 2,
-        "drive_id": "1XYHToHUYg2lxUrp_ZGG4NLGPv1XaJKDS",
+        "drive_id": "10RVC61BpnkKHxp1GTY1NGbbzU9s_nE9p",
         "slot_path": "anotasi/slot_polygons2.json",
         "filename": "video/input2.mp4",
     },
