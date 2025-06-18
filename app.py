@@ -1,3 +1,4 @@
+import glob
 import json
 import tempfile
 from pathlib import Path
@@ -294,7 +295,10 @@ if st.session_state.slots is not None:
     # --- Parameter batch ---
     BATCH_SIZE = 100
 
-    # Inisialisasi proses video jika tombol ditekan atau session state kosong
+    # Inisialisasi batch_num di session state
+    if "batch_num" not in st.session_state:
+        st.session_state.batch_num = 1
+
     if (
         st.button("Proses Video Hasil Deteksi")
         or st.session_state.video_process is not None
@@ -310,9 +314,12 @@ if st.session_state.slots is not None:
             status_placeholder = st.empty()
             status_placeholder.info("Proses sedang berjalan...")
 
-            temp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            # Nama file hasil batch
+            batch_num = st.session_state.batch_num
+            batch_filename = f"hasil_batch_{batch_num}.mp4"
+            batch_filepath = str(Path(tempfile.gettempdir()) / batch_filename)
             out = cv2.VideoWriter(
-                temp_video.name,
+                batch_filepath,
                 cv2.VideoWriter_fourcc(*"mp4v"),
                 fps,
                 (width, height),
@@ -327,39 +334,39 @@ if st.session_state.slots is not None:
             last_detections = None
             last_results = None
 
-            # Simpan state awal proses batch
             st.session_state.video_process = {
                 "frame_idx": frame_idx,
                 "last_detections": last_detections,
                 "last_results": last_results,
                 "tracker": tracker,
-                "temp_video_path": temp_video.name,
+                "batch_filepath": batch_filepath,
                 "total_frames": total_frames,
                 "slots": slots,
                 "video_path": video_path,
                 "fps": fps,
                 "width": width,
                 "height": height,
+                "batch_num": batch_num,
             }
             cap.release()
             out.release()
 
         # --- Lanjutkan proses batch ---
-        # Ambil state dari session
         process = st.session_state.video_process
         frame_idx = process["frame_idx"]
         total_frames = process["total_frames"]
         slots = process["slots"]
-        temp_video_path = process["temp_video_path"]
+        batch_filepath = process["batch_filepath"]
         fps = process["fps"]
         width = process["width"]
         height = process["height"]
+        batch_num = process["batch_num"]
 
         # Buka video dan writer, seek ke frame terakhir
         cap = cv2.VideoCapture(video_path)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         out = cv2.VideoWriter(
-            temp_video_path,
+            batch_filepath,
             cv2.VideoWriter_fourcc(*"mp4v"),
             fps,
             (width, height),
@@ -371,6 +378,7 @@ if st.session_state.slots is not None:
         status_placeholder.info("Proses batch sedang berjalan...")
 
         batch_counter = 0
+        batch_start_frame = frame_idx
         while frame_idx < total_frames and batch_counter < BATCH_SIZE:
             ret, frame = cap.read()
             if not ret:
@@ -389,10 +397,7 @@ if st.session_state.slots is not None:
                     x1, y1, x2, y2 = map(int, box)
                     detections.append([x1, y1, x2, y2])
 
-            # Tracking
             tracks = tracker.update(frame, detections)
-
-            # Buat mapping bbox->track_id
             bbox_id_map = {}
             for track_id, bbox in tracks:
                 if bbox is None or len(bbox) != 4:
@@ -416,7 +421,6 @@ if st.session_state.slots is not None:
                 if best_det is not None and best_iou > 0.3:
                     bbox_id_map[best_det] = track_id
 
-            # Gambar bounding box dan ID (jika ada)
             for det in detections:
                 x1, y1, x2, y2 = det
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
@@ -432,7 +436,6 @@ if st.session_state.slots is not None:
                         2,
                     )
 
-            # Cek slot kosong untuk setiap slot pada setiap frame
             slot_status = {}
             for slot in slots:
                 slot_id = slot["id"]
@@ -474,16 +477,13 @@ if st.session_state.slots is not None:
 
             out.write(frame)
 
-            # Simpan deteksi terakhir dan hasil terakhir
             last_detections = detections
             last_results = results
 
-            # Update progress bar
             frame_idx += 1
             batch_counter += 1
             if frame_idx % 10 == 0 or frame_idx == total_frames:
                 progress_bar.progress(min(frame_idx / total_frames, 1.0))
-            # Show preview every 50 frames
             if frame_idx % 50 == 0:
                 preview_placeholder.image(
                     cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
@@ -501,28 +501,77 @@ if st.session_state.slots is not None:
                 "frame_idx": frame_idx,
                 "last_detections": last_detections,
                 "last_results": last_results,
+                "batch_filepath": batch_filepath,
+                "batch_num": batch_num,
             }
         )
 
-        # Jika selesai, tampilkan tombol download dan hapus session state
+        # Tombol download untuk batch ini
+        with open(batch_filepath, "rb") as f:
+            video_bytes = f.read()
+        st.download_button(
+            label=f"Unduh Hasil Batch {batch_num} (frame {batch_start_frame+1}-{frame_idx})",
+            data=video_bytes,
+            file_name=f"hasil_batch_{batch_num}.mp4",
+            mime="video/mp4",
+            key=f"download_batch_{batch_num}",
+        )
+
+        # Jika selesai seluruh video
         if st.session_state.video_process["frame_idx"] >= total_frames:
-            with open(st.session_state.video_process["temp_video_path"], "rb") as f:
-                video_bytes = f.read()
-            st.download_button(
-                label="Unduh Video Hasil Deteksi",
-                data=video_bytes,
-                file_name="hasil_deteksi.mp4",
-                mime="video/mp4",
-            )
-            Path(st.session_state.video_process["temp_video_path"]).unlink(
-                missing_ok=True
-            )
             st.session_state.video_process = None
             st.success("Proses video selesai!")
+
+            # --- Gabungkan semua batch menjadi satu video ---
+            # Cari semua file batch yang sudah dibuat
+            temp_dir = tempfile.gettempdir()
+            batch_files = sorted(
+                glob.glob(str(Path(temp_dir) / "hasil_batch_*.mp4")),
+                key=lambda x: int(Path(x).stem.split("_")[-1]),
+            )
+            if batch_files:
+                # Ambil info video dari batch pertama
+                cap0 = cv2.VideoCapture(batch_files[0])
+                fps = cap0.get(cv2.CAP_PROP_FPS)
+                width = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap0.release()
+
+                full_video_path = str(Path(temp_dir) / "hasil_full.mp4")
+                out_full = cv2.VideoWriter(
+                    full_video_path,
+                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    fps,
+                    (width, height),
+                )
+
+                # Gabungkan semua frame dari setiap batch
+                for batch_file in batch_files:
+                    cap = cv2.VideoCapture(batch_file)
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        out_full.write(frame)
+                    cap.release()
+                out_full.release()
+
+                # Tampilkan tombol download untuk full video
+                with open(full_video_path, "rb") as f:
+                    full_bytes = f.read()
+                st.download_button(
+                    label="Unduh Full Video Gabungan",
+                    data=full_bytes,
+                    file_name="hasil_full.mp4",
+                    mime="video/mp4",
+                    key="download_full_video",
+                )
         else:
             st.info(
-                f"Batch selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
+                f"Batch {batch_num} selesai. {st.session_state.video_process['frame_idx']}/{total_frames} frame telah diproses."
             )
             # Tombol lanjutkan proses
             if st.button("Lanjutkan Proses", key="continue_process"):
+                st.session_state.batch_num += 1
+                st.session_state.video_process = None
                 st.experimental_rerun()
