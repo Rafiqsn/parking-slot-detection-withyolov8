@@ -126,6 +126,8 @@ drive_id = video_cfg["drive_id"]
 # Cek apakah video sudah ada, jika belum download dulu
 video_file = Path(video_path)
 if not video_file.exists():
+    # Pastikan folder tujuan ada
+    video_file.parent.mkdir(parents=True, exist_ok=True)
     with st.spinner(f"Mengunduh video ID {drive_id} dari Google Drive..."):
         try:
             download_from_gdrive(drive_id, video_path)
