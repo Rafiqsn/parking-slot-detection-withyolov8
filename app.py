@@ -4,6 +4,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import requests
 import streamlit as st
 import torch
 from ultralytics import YOLO
@@ -24,15 +25,114 @@ def load_model():
 
 detector, tracker = load_model()
 
+# --- Konfigurasi video dari Google Drive ---
+# Mapping: video_id -> (drive_file_id, slot_polygon_path, local_filename)
+VIDEO_CONFIG = [
+    {
+        "id": 1,
+        "drive_id": "1g452_pqKTBNNoIGE6SnwOThapTiDuvpj",  # Ganti dengan ID Google Drive asli
+        "slot_path": "anotasi/slot_polygons1.json",
+        "filename": "video/input1.mp4",
+    },
+    {
+        "id": 2,
+        "drive_id": "1jSudC2pEu4n8b0CSP5RwI7td26Wl5JhM",
+        "slot_path": "anotasi/slot_polygons2.json",
+        "filename": "video/input2.mp4",
+    },
+    {
+        "id": 3,
+        "drive_id": "1w93ospu_e89NADDfO5kk5PzhasxhePcU",
+        "slot_path": "anotasi/slot_polygons3.json",
+        "filename": "video/input3.mp4",
+    },
+    {
+        "id": 4,
+        "drive_id": "1-CiiBqf37OPX_L0EVYP57WTeyw3Wdroa",
+        "slot_path": "anotasi/slot_polygons4.json",
+        "filename": "video/input4.mp4",
+    },
+    {
+        "id": 5,
+        "drive_id": "1k1Es8k8ESV1_w3kA4L3dBYB9NBVq0BPP",
+        "slot_path": "anotasi/slot_polygons5.json",
+        "filename": "video/input5.mp4",
+    },
+    {
+        "id": 6,
+        "drive_id": "14djCdke8349btuPnUDig_Nm3uvsFjyHO",
+        "slot_path": "anotasi/slot_polygons6.json",
+        "filename": "video/input6.mp4",
+    },
+    {
+        "id": 7,
+        "drive_id": "1gb0IoEuLt7MjTWfABOp6bLL206oNrHBP",
+        "slot_path": "anotasi/slot_polygons7.json",
+        "filename": "video/input7.mp4",
+    },
+    {
+        "id": 8,
+        "drive_id": "1HIz11DiNss44M-KigpLsf6JgbvrqIoPO",
+        "slot_path": "anotasi/slot_polygons8.json",
+        "filename": "video/input8.mp4",
+    },
+    {
+        "id": 9,
+        "drive_id": "1PUTm9vx0LgVFrpmgSJL85W2AVJXEdm5_",
+        "slot_path": "anotasi/slot_polygons9.json",
+        "filename": "video/input9.mp4",
+    },
+    {
+        "id": 10,
+        "drive_id": "1B62L3YQQXTWGfBpYp03YykUb_HM4kPM_",
+        "slot_path": "anotasi/slot_polygons10.json",
+        "filename": "video/input10.mp4",
+    },
+]
+
+
+def download_from_gdrive(drive_id, dest_path):
+    # Download file dari Google Drive (public) menggunakan requests
+    # Untuk file besar, gunakan confirm token
+    URL = "https://docs.google.com/uc?export=download"
+    session = requests.Session()
+    response = session.get(URL, params={"id": drive_id}, stream=True)
+    token = None
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = value
+    if token:
+        params = {"id": drive_id, "confirm": token}
+        response = session.get(URL, params=params, stream=True)
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(32768):
+            if chunk:
+                f.write(chunk)
+
+
 # Static config
 VIDEO_LIST = [f"video/input{i}.mp4" for i in range(1, 11)]
 SLOT_POLYGON_LIST = [f"anotasi/slot_polygons{i}.json" for i in range(1, 11)]
 
 # UI
 st.title("Deteksi Slot Parkir Kosong")
-video_idx = st.selectbox("Pilih Video Parkiran", list(range(1, 11)))
-video_path = VIDEO_LIST[video_idx - 1]
-slot_path = SLOT_POLYGON_LIST[video_idx - 1]
+video_options = [cfg["id"] for cfg in VIDEO_CONFIG]
+video_idx = st.selectbox("Pilih Video Parkiran", video_options)
+video_cfg = next(cfg for cfg in VIDEO_CONFIG if cfg["id"] == video_idx)
+video_path = video_cfg["filename"]
+slot_path = video_cfg["slot_path"]
+drive_id = video_cfg["drive_id"]
+
+# Cek apakah video sudah ada, jika belum download dulu
+video_file = Path(video_path)
+if not video_file.exists():
+    with st.spinner(f"Mengunduh video ID {drive_id} dari Google Drive..."):
+        try:
+            download_from_gdrive(drive_id, video_path)
+            st.success("Video berhasil diunduh.")
+        except Exception as e:
+            st.error(f"Gagal mengunduh video: {e}")
+            st.stop()
 
 # Tampilkan video player
 st.video(video_path)

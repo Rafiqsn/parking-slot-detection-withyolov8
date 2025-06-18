@@ -1,4 +1,6 @@
 ultralytics
-onnx
 torch
 streamlit
+scipy
+Pillow
+torchvision
